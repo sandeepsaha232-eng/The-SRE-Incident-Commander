@@ -26,6 +26,7 @@ class SREEnvironment(Environment):
         self._server_state = ServerState(episode_id=str(uuid4()), step_count=0)
         self._state: EnvState = EnvState(processes=[], is_website_up=True)
         self._anomaly_name: str | None = None
+        self._current_task_level: str | None = None
         self._done: bool = False
 
     @property
@@ -60,6 +61,8 @@ class SREEnvironment(Environment):
         """
         if task_level not in {"easy", "medium", "hard"}:
             raise ValueError("task_level must be 'easy', 'medium' or 'hard'")
+            
+        self._current_task_level = task_level
 
         normal = [
             ProcessInfo(pid=1, name="systemd", cpu_cost=5.0, memory_cost=5.0),
@@ -72,7 +75,7 @@ class SREEnvironment(Environment):
         elif task_level == "medium":
             anomaly = ProcessInfo(pid=100, name="crypto_miner", cpu_cost=70.0, memory_cost=40.0)
         else:  # hard
-            anomaly = ProcessInfo(pid=101, name="malware", cpu_cost=85.0, memory_cost=60.0)
+            anomaly = ProcessInfo(pid=101, name="worker", cpu_cost=85.0, memory_cost=60.0)
 
         self._state = EnvState(processes=normal + [anomaly], is_website_up=True)
         self._anomaly_name = anomaly.name
@@ -94,6 +97,26 @@ class SREEnvironment(Environment):
         """
         self._server_state.step_count += 1
         
+        # --- Dynamics: Telemetry Noise ---
+        import random
+        for p in self._state.processes:
+            p.cpu_cost = max(0.1, p.cpu_cost + random.uniform(-2.0, 2.0))
+            p.memory_cost = max(0.1, p.memory_cost + random.uniform(-2.0, 2.0))
+            
+        # --- Dynamics: Evolving Memory Leak ---
+        if self._current_task_level == "hard":
+            for p in self._state.processes:
+                if p.name == "worker":
+                    p.memory_cost *= 1.12
+                    
+        # --- Dynamics: OOM Killer ---
+        oom_warning = ""
+        total_mem_raw = sum(p.memory_cost for p in self._state.processes)
+        if total_mem_raw > 100.0 and self._state.processes:
+            victim = random.choice(self._state.processes)
+            self._state.processes.remove(victim)
+            oom_warning = f" [WARNING: OOM Killer invoked: killed {victim.name}]"
+        
         cmd_output = ""
         if action.command == "list_processes":
             cmd_output = ", ".join(p.name for p in self._state.processes)
@@ -102,10 +125,12 @@ class SREEnvironment(Environment):
             if not target:
                 cmd_output = "no target provided"
             else:
-                before = len(self._state.processes)
-                self._state.processes = [p for p in self._state.processes if str(p.pid) != target and p.name != target]
-                after = len(self._state.processes)
-                cmd_output = f"killed {before - after} process(es)"
+                matched = [p for p in self._state.processes if str(p.pid) == target or p.name == target]
+                if not matched:
+                    cmd_output = f"bash: kill: ({target}) - No such process"
+                else:
+                    self._state.processes = [p for p in self._state.processes if p not in matched]
+                    cmd_output = f"killed {len(matched)} process(es)"
         elif action.command == "restart_service":
             target = action.target
             if target == "nginx":
@@ -120,29 +145,41 @@ class SREEnvironment(Environment):
             cmd_output = "metrics checked"
         else:
             cmd_output = "unknown command"
+            
+        cmd_output += oom_warning
 
         cpu, mem = self._calc_usage()
         status = self._system_status(cpu, mem)
+        
+        # --- Dynamics: Cascading Failure ---
+        if not any(p.name == "nginx" for p in self._state.processes):
+            self._state.is_website_up = False
+            status = "CRITICAL"
+
         observation = Observation(
             cpu_usage=cpu,
             memory_usage=mem,
             system_status=status,
-            command_output=cmd_output,
+            command_output=cmd_output.strip(),
         )
 
         reward = 0.0
+        done = False
+        
         if cpu < 60.0 and mem < 60.0 and self._state.is_website_up:
             reward = 1.0
+            done = True
+            
         if self._anomaly_name and any(p.name == self._anomaly_name for p in self._state.processes):
             reward = 0.0
-        if not any(p.name == "nginx" for p in self._state.processes):
+            
+        if not self._state.is_website_up:
             reward = 0.0
-
-        done = False
-        if reward == 1.0:
             done = True
+            
         if status == "CRITICAL":
             done = True
+            
         self._done = done
 
         info = {
