@@ -1,16 +1,12 @@
 ---
-title: Sre Incident Commander Environment Server
-emoji: 💿
+title: Sre Incident Commander
+emoji: 🚀
 colorFrom: blue
-colorTo: green
+colorTo: red
 sdk: docker
 pinned: false
-app_port: 8000
-base_path: /web
-tags:
-  - openenv
+short_description: Train AI agents to diagnose server outages
 ---
-
 # Sre Incident Commander Environment
 
 A simple test environment that echoes back messages. Perfect for testing the env APIs as well as demonstrating environment usage patterns.
