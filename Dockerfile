@@ -1,23 +1,18 @@
 FROM python:3.10-slim
 
-# Create a non-root user named user with uid 1000
-RUN useradd -m -u 1000 user
-
-# Set working directory
 WORKDIR /app
 
-# Copy requirements and install dependencies
-COPY requirements.txt /app/
+# Copy the requirements file first (this is an SRE best practice for caching)
+COPY requirements.txt .
+
+# Install the dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all python files
-COPY --chown=user:user . /app/
+# Copy the rest of your code
+COPY . .
 
-# Switch to the non-root user
-USER user
-
-# Expose port 7860 for Hugging Face Spaces
+# Expose the port FastAPI runs on
 EXPOSE 7860
 
-# Command to run the FastAPI app
+# Run the app
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]

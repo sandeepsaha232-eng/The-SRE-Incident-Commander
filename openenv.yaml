@@ -1,0 +1,12 @@
+version: "1.0.0"
+environment_name: "sre-incident-commander"
+entry_point: "app:app"
+description: "AI-powered SRE Fleet Management and Incident Remediation simulation."
+task_ids: ["easy", "medium", "hard"]
+observation_space:
+  cpu_usage: "float (0.0 - 100.0)"
+  memory_usage: "float (0.0 - 100.0)"
+  system_status: "string (HEALTHY/CRITICAL)"
+action_space:
+  command: "string (e.g., list_processes, kill_process)"
+  target: "string (optional PID or name)"

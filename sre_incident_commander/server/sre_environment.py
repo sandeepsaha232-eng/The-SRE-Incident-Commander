@@ -97,8 +97,15 @@ class SREEnvironment(Environment):
         """
         self._server_state.step_count += 1
         
-        # --- Dynamics: Telemetry Noise ---
         import random
+        from datetime import datetime
+        
+        # --- Dynamics: Terminal History ---
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        target_str = f" on target '{action.target}'" if action.target else ""
+        self._state.history.append(f"[{timestamp}] Executed {action.command}{target_str}")
+        
+        # --- Dynamics: Telemetry Noise ---
         for p in self._state.processes:
             p.cpu_cost = max(0.1, p.cpu_cost + random.uniform(-2.0, 2.0))
             p.memory_cost = max(0.1, p.memory_cost + random.uniform(-2.0, 2.0))
@@ -155,6 +162,10 @@ class SREEnvironment(Environment):
         if not any(p.name == "nginx" for p in self._state.processes):
             self._state.is_website_up = False
             status = "CRITICAL"
+            
+        # Append history to command output
+        recent_history = "\n".join(self._state.history[-5:])
+        cmd_output = f"{cmd_output.strip()}\n\n--- Recent History ---\n{recent_history}"
 
         observation = Observation(
             cpu_usage=cpu,
@@ -166,18 +177,25 @@ class SREEnvironment(Environment):
         reward = 0.0
         done = False
         
-        if cpu < 60.0 and mem < 60.0 and self._state.is_website_up:
-            reward = 1.0
-            done = True
-            
-        if self._anomaly_name and any(p.name == self._anomaly_name for p in self._state.processes):
-            reward = 0.0
-            
+        anomaly_alive = self._anomaly_name and any(p.name == self._anomaly_name for p in self._state.processes)
+        
         if not self._state.is_website_up:
             reward = 0.0
             done = True
+        elif not anomaly_alive:
+            if cpu < 30.0 and mem < 40.0:
+                reward = 1.0
+                done = True
+            else:
+                reward = 0.5
+        else:
+            reward = 0.0
             
-        if status == "CRITICAL":
+        # Apply penalty
+        reward -= 0.05 * self._server_state.step_count
+        reward = max(0.0, reward)
+            
+        if status == "CRITICAL" and not self._state.is_website_up:
             done = True
             
         self._done = done

@@ -94,3 +94,4 @@ class State(BaseModel):
 
     processes: List[ProcessInfo] = Field(..., description="List of running processes.")
     is_website_up: bool = Field(..., description="Website availability flag.")
+    history: List[str] = Field(default_factory=list, description="A terminal history log of executed commands.")
